@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="e4b7f272-128d-4d3b-9a1d-6dd9f3152886" name="xv6-labs-2020">
+        <fileTransfer accessType="SFTP" host="1.13.195.12" port="22" sshConfigId="5e51b5b7-e1ff-4070-968c-fcdf8ac670a3" sshConfig="lighthouse@1.13.195.12:22 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>
