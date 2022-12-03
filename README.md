@@ -5,7 +5,7 @@
 ## #注意事项
 + 每个 lab-code 都上传至 branch 的相应位置，其中
 
-  | Branch | Labx |
+  | Branch | Labs |
   | :----: | :--: |
   | syscall | lab2: system calls |
   | pgtbl | lab3: page tables |
