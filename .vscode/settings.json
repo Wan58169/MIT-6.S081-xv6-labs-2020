@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "spinlock.h": "c",
+        "cstdlib": "c",
+        "proc.h": "c"
+    }
+}
