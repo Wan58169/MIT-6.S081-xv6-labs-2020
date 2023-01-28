@@ -332,9 +332,6 @@ sfence_vma()
 #define PTE_X (1L << 3)
 #define PTE_U (1L << 4) // 1 -> user can access
 
-/** 在PTE中添加COW标记位，其中第8位和第9位是预留位，可用！ */
-#define PTE_COW (1L << 8)
-
 // shift a physical address to the right place for a PTE.
 #define PA2PTE(pa) ((((uint64)pa) >> 12) << 10)
 

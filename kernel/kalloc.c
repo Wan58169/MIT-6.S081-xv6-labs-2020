@@ -23,26 +23,18 @@ struct {
   struct run *freelist;
 } kmem;
 
-/** 引用计数块 */
-typedef struct {
+struct {
   struct spinlock lock;
-  int count;
-} memref;
-
-#define MEMREFS PHYSTOP/PGSIZE
-
-/** 引用计数向量，监测每个页块 */
-memref memrefs[MEMREFS];
+  struct run *freelist;
+} kmems[NCPU];
 
 void
 kinit()
 {
-  /** 初始化引用计数向量 */
-  for(int i=0; i<MEMREFS; i++) 
-    initlock(&(memrefs[i].lock), "memrefs");
-
-  initlock(&kmem.lock, "kmem");
-  freerange(end, (void*)PHYSTOP);
+  // initlock(&kmem.lock, "kmem");
+  for(int i=0; i<NCPU; i++)
+    initlock(&kmems[i].lock, "kmem");
+  freerange(end, (void*)PHYSTOP); 
 }
 
 void
@@ -66,26 +58,26 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  /** 释放页块时需要解引用 */
-  uint32 i = (uint64)pa/PGSIZE;
-  acquire(&(memrefs[i].lock));
-  memrefs[i].count--;
-
-  if(memrefs[i].count > 0) 
-    goto notzero;
-
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  /** 获取 cpuid 时要关中断，完事之后再把中断开下来 */
+  push_off();
+  int id = cpuid();
+  pop_off();
 
-notzero:
-  release(&(memrefs[i].lock));
+  /** 将空闲的 page 归还给第 id 个 CPU */
+  acquire(&kmems[id].lock);
+  r->next = kmems[id].freelist;
+  kmems[id].freelist = r;
+  release(&kmems[id].lock);
+
+  // acquire(&kmem.lock);
+  // r->next = kmem.freelist;
+  // kmem.freelist = r;
+  // release(&kmem.lock);
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -96,96 +88,48 @@ kalloc(void)
 {
   struct run *r;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
-  
+  /** 获取 cpuid 时要关中断，完事之后再把中断开下来 */
+  push_off();
+  int id = cpuid();
+  pop_off();
+
+  /** 尝试获取剩余的空闲 page */
+  acquire(&kmems[id].lock);
+  r = kmems[id].freelist;
   if(r) {
-    /** 初始化引用计数，刚alloc完，引用必然为1 */
-    uint32 i = (uint64)r/PGSIZE;
-    acquire(&(memrefs[i].lock));
-    memrefs[i].count = 1;
-    release(&(memrefs[i].lock));
+    kmems[id].freelist = r->next;
+  } else {
+    for(int i=0; i<NCPU; i++) {
+      if(i == id)
+        continue;
 
-    kmem.freelist = r->next;
+      /** 尝试偷一个其他 CPU 的空闲 page */
+      acquire(&kmems[i].lock);
+      if(!kmems[i].freelist) {
+        release(&kmems[i].lock);
+        continue;
+      }
+      
+      r = kmems[i].freelist;
+      kmems[i].freelist = r->next;
+      release(&kmems[i].lock);
+      break;
+    }
   }
-  release(&kmem.lock);
+  release(&kmems[id].lock);
 
+  /** 有一种可能：第id个CPU没有空闲 page ，也没偷到 */
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
-}
 
-/** 新分配的页块，也要增加引用 */
-int
-incr_ref(void* pa)
-{
-   if(((uint64)pa%PGSIZE)!=0 || (char*)pa<end || (uint64)pa>=PHYSTOP)
-    return -1;
+  // acquire(&kmem.lock);
+  // r = kmem.freelist;
+  // if(r)
+  //   kmem.freelist = r->next;
+  // release(&kmem.lock);
 
-  uint32 i = (uint64)pa/PGSIZE;
-  acquire(&(memrefs[i].lock));
-  memrefs[i].count++;
-  release(&(memrefs[i].lock));
-  return 1;
-}
-
-/** 检查该页块是否为copy-on-write */
-int 
-iscow(pagetable_t pagetable, uint64 va)
-{
-  if(va > MAXVA)
-    return 0;
-
-  pte_t* pte = walk(pagetable, va, 0);
-  if(pte==0 || (*pte&PTE_V)==0)
-    return 0;
-
-  return (*pte&PTE_COW);
-}
-
-/** copy-on-write拷贝工作（父->子） */
-uint64 
-cowcopy(pagetable_t pagetable, uint64 va)
-{
-  va = PGROUNDDOWN(va);
-  pte_t* pte = walk(pagetable, va, 0);
-  uint64 pa = PTE2PA(*pte);
-  uint32 i = pa/PGSIZE;
-
-  /** 检查是否只有一个进程正在使用该页块 */
-  acquire(&(memrefs[i].lock));
-  if(memrefs[i].count == 1) {
-    /** 恢复该页块的写入权限 */
-    *pte |= PTE_W;
-    *pte &= (~PTE_COW);
-    release(&(memrefs[i].lock));
-    return pa;
-  }
-
-  release(&(memrefs[i].lock));
-  /** 尝试分配空间（缺页中断handler） */
-  char* mem = kalloc();
-  if(mem == 0)
-    return 0;
-
-  /** 拷贝工作 */
-  memmove(mem, (char*)pa, PGSIZE);
-  *pte &= (~PTE_V);
-  uint64 flag = PTE_FLAGS(*pte);
-  flag |= PTE_W;
-  flag &= (~PTE_COW);
-
-  if(mappages(pagetable, va, PGSIZE, (uint64)mem, flag) != 0) 
-    goto freeing;
-  
-  /** 顺利结束拷贝工作 */
-  goto rest;
-
-freeing:
-  kfree(mem);
-  return 0;
-  
-rest:
-  kfree((char*)PGROUNDDOWN(pa));
-  return (uint64)mem;
+  // if(r)
+  //   memset((char*)r, 5, PGSIZE); // fill with junk
+  // return (void*)r;
 }
