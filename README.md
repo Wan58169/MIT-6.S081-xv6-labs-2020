@@ -1,4 +1,8 @@
 # #MIT-6.S081 xv6-labs-2020 code
+
+## #课程&实验官网
++ [MIT-6.S081 xv6-labs-2020](https://pdos.csail.mit.edu/6.828/2020/schedule.html)
+
 ## #博客地址
 + [CSDN - 万8169](https://blog.csdn.net/qq_34872231/category_12139190.html?spm=1001.2014.3001.5482)
 
@@ -9,6 +13,7 @@
 + [x] [lab5: lazy page allocation](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/lazy)
 + [x] [lab6: copy-on-write fork](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/cow)
 + [x] [lab7: multithreading](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/thread)
++ [x] [lab8: locks](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/lock)
 
 ## #注意事项
 + 每个 lab-code 都上传至 branch 的相应位置，其中
@@ -21,3 +26,4 @@
   | lazy  | lab5: lazy page allocation|
   | cow   | lab6: copy-on-write fork|
   | thread   | lab7: multithreading|
+  | lock | lab8: locks |
