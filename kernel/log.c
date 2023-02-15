@@ -39,8 +39,8 @@ struct logheader {
 
 struct log {
   struct spinlock lock;
-  int start;
-  int size;
+  int start;  /** 第一个 log block 的块号 */
+  int size;   /** log block 的个数 */
   int outstanding; // how many FS sys calls are executing.
   int committing;  // in commit(), please wait.
   int dev;

@@ -199,9 +199,10 @@ ialloc(uint dev, short type)
   struct buf *bp;
   struct dinode *dip;
 
+  /** 尝试在 icache 中寻找空闲的 inode */
   for(inum = 1; inum < sb.ninodes; inum++){
-    bp = bread(dev, IBLOCK(inum, sb));
-    dip = (struct dinode*)bp->data + inum%IPB;
+    bp = bread(dev, IBLOCK(inum, sb));   /** 返回包含第 inum 号 inode 的 block */
+    dip = (struct dinode*)bp->data + inum%IPB;  /** 在 block 中定位到第 inum 号 inode */
     if(dip->type == 0){  // a free inode
       memset(dip, 0, sizeof(*dip));
       dip->type = type;
@@ -218,6 +219,7 @@ ialloc(uint dev, short type)
 // Must be called after every change to an ip->xxx field
 // that lives on disk, since i-node cache is write-through.
 // Caller must hold ip->lock.
+/** 将 inode 最新的 metadata 写回 disk  */
 void
 iupdate(struct inode *ip)
 {
@@ -246,6 +248,11 @@ iget(uint dev, uint inum)
 
   acquire(&icache.lock);
 
+  /**
+   * 在 icache 中尝试寻找名为 dev ，编号为 inum 的 inode
+   * 如果 inode 在 icache 中，则直接返回
+   * 反之，则分配一个空闲块作为新 inode
+  */
   // Is the inode already cached?
   empty = 0;
   for(ip = &icache.inode[0]; ip < &icache.inode[NINODE]; ip++){
@@ -299,6 +306,8 @@ ilock(struct inode *ip)
   if(ip->valid == 0){
     bp = bread(ip->dev, IBLOCK(ip->inum, sb));
     dip = (struct dinode*)bp->data + ip->inum%IPB;
+
+    /** 读取 inode 的最新 metadata */
     ip->type = dip->type;
     ip->major = dip->major;
     ip->minor = dip->minor;
@@ -374,6 +383,7 @@ iunlockput(struct inode *ip)
 
 // Return the disk block address of the nth block in inode ip.
 // If there is no such block, bmap allocates one.
+/** 为 ip inode 分配第 bn 块 block */
 static uint
 bmap(struct inode *ip, uint bn)
 {
@@ -385,6 +395,7 @@ bmap(struct inode *ip, uint bn)
       ip->addrs[bn] = addr = balloc(ip->dev);
     return addr;
   }
+  /** 说明 bn > NDIRECT ，应该计算 block 在一级 indirect 目录中的逻辑编号 */
   bn -= NDIRECT;
 
   if(bn < NINDIRECT){
@@ -400,12 +411,40 @@ bmap(struct inode *ip, uint bn)
     brelse(bp);
     return addr;
   }
+  /** 说明 bn > NINDIRECT ，应该计算 block 在二级 indirect 目录中的逻辑编号 */
+  bn -= NINDIRECT;
 
-  panic("bmap: out of range");
+  if(bn >= NDINDIRECT) 
+    panic("bmap: out of range");
+
+  /** 把二级 indirect 目录调至 Buffer cache 中 */
+  if((addr = ip->addrs[NDIRECT+1]) == 0)
+    ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+  bp = bread(ip->dev, addr);
+  a = (uint*)bp->data;  /** 定位到二级 indirect 目录 */
+  uint i = bn/NINDIRECT;  /** 定位到二级 indirect 目录中的第 i 条 entry */
+  bn %= NINDIRECT;  /** 第 bn 块 block */
+
+  /** 把三级的 indirect 目录调至 Buffer cache 中 */
+  if((addr = a[i]) == 0) {
+    a[i] = addr = balloc(ip->dev);
+    log_write(bp);
+  }
+  brelse(bp);
+
+  bp = bread(ip->dev, addr);
+  a = (uint*)bp->data;  /** 定位到三级 indirect 目录 */
+  if((addr = a[bn]) == 0) { /** 第 bn 块 block */
+    a[bn] = addr = balloc(ip->dev);
+    log_write(bp);
+  }
+  brelse(bp);
+  return addr;
 }
 
 // Truncate inode (discard contents).
 // Caller must hold ip->lock.
+/** 清空 inode 所包含的文件内容 */
 void
 itrunc(struct inode *ip)
 {
@@ -413,6 +452,7 @@ itrunc(struct inode *ip)
   struct buf *bp;
   uint *a;
 
+  /** 清空一级 indirect 目录 */
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
@@ -420,6 +460,7 @@ itrunc(struct inode *ip)
     }
   }
 
+  /** 清空二级 indirect 目录 */
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -432,6 +473,29 @@ itrunc(struct inode *ip)
     ip->addrs[NDIRECT] = 0;
   }
 
+  /** 清空三级 indirect 目录 */
+  if(!ip->addrs[NDIRECT+1])
+    goto truncDone;
+
+  bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+  a = (uint*)bp->data;  /** 先定位到二级 indirect 目录 */
+  for(int i=0; i<NINDIRECT; i++) {  /** 遍历二级目录中的每个非空三级 indirect 目录 */
+    if(!a[i])
+      continue;
+    
+    struct buf *bp2 = bread(ip->dev, *(a+i));
+    uint *a2 = (uint*)bp2->data;  /** 定位到非空的三级 indirect 目录 */
+    for(int j=0; j<NINDIRECT; j++) {
+      if(a2[j]) bfree(ip->dev, a2[j]);    
+    }
+    a2[j] = 0;
+    brelse(bp2);
+  }
+  brelse(bp);
+  bfree(ip->dev, ip->addrs[NDIRECT+1]);
+  ip->addrs[NDIRECT+1] = 0;
+
+truncDone:
   ip->size = 0;
   iupdate(ip);
 }
@@ -480,6 +544,10 @@ readi(struct inode *ip, int user_dst, uint64 dst, uint off, uint n)
 // Caller must hold ip->lock.
 // If user_src==1, then src is a user virtual address;
 // otherwise, src is a kernel address.
+// Returns the number of bytes successfully written.
+// If the return value is less than the requested n,
+// there was an error of some kind.
+/** 在 ip inode 的第 offset 位置上接着写入 n 长度的 src ，并返回成功写入的字节数 */
 int
 writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
 {
@@ -496,23 +564,21 @@ writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
     m = min(n - tot, BSIZE - off%BSIZE);
     if(either_copyin(bp->data + (off % BSIZE), user_src, src, m) == -1) {
       brelse(bp);
-      n = -1;
       break;
     }
     log_write(bp);
     brelse(bp);
   }
 
-  if(n > 0){
-    if(off > ip->size)
-      ip->size = off;
-    // write the i-node back to disk even if the size didn't change
-    // because the loop above might have called bmap() and added a new
-    // block to ip->addrs[].
-    iupdate(ip);
-  }
+  if(off > ip->size)
+    ip->size = off;
 
-  return n;
+  // write the i-node back to disk even if the size didn't change
+  // because the loop above might have called bmap() and added a new
+  // block to ip->addrs[].
+  iupdate(ip);
+
+  return tot;
 }
 
 // Directories
@@ -525,6 +591,9 @@ namecmp(const char *s, const char *t)
 
 // Look for a directory entry in a directory.
 // If found, set *poff to byte offset of entry.
+/** 
+ * 在 dp 中查找目录名为 name 的目录，返回其 inode ，
+ * 若没有此 inode ，icahce 会分配一个空 slot */
 struct inode*
 dirlookup(struct inode *dp, char *name, uint *poff)
 {
@@ -624,6 +693,9 @@ skipelem(char *path, char *name)
 // If parent != 0, return the inode for the parent and copy the final
 // path element into name, which must have room for DIRSIZ bytes.
 // Must be called inside a transaction since it calls iput().
+/** 
+ * 返回文件名为 path 的 inode ，若有父节点，
+ * 则返回其 inode ，并将其路径名拷贝到 name 中 */
 static struct inode*
 namex(char *path, int nameiparent, char *name)
 {
@@ -666,6 +738,9 @@ namei(char *path)
   return namex(path, 0, name);
 }
 
+/** 
+ * 返回文件名为 path 的 inode ，若没找到，
+ * 则返回其父节点的 inode ，并将其路径名拷贝至 name 中*/
 struct inode*
 nameiparent(char *path, char *name)
 {
