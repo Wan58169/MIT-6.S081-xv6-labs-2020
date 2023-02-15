@@ -15,7 +15,7 @@
 + [x] [lab6: copy-on-write fork](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/cow)
 + [x] [lab7: multithreading](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/thread)
 + [x] [lab8: locks](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/lock)
-+ [x] [lab9: file system]()
++ [x] [lab9: file system](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/fs)
 
 ## #注意事项
 + 每个 lab-code 都上传至 branch 的相应位置，其中
