@@ -238,30 +238,26 @@ bad:
   return -1;
 }
 
-/** 分配一个新的 inode ，其名为 path */
 static struct inode*
 create(char *path, short type, short major, short minor)
 {
   struct inode *ip, *dp;
   char name[DIRSIZ];
 
-  /** 试图获取 path 的父节点（目录）的 inode */
   if((dp = nameiparent(path, name)) == 0)
     return 0;
 
   ilock(dp);
 
-  /** 在 path 父节点 inode 中查找目录名为 name 的 inode */
-  if((ip = dirlookup(dp, name, 0)) != 0){ /** 若没有找到，会新分配一个 */
-    iunlockput(dp);   /** 对应上边的 ilock(dp) */
-    ilock(ip);    
+  if((ip = dirlookup(dp, name, 0)) != 0){
+    iunlockput(dp);
+    ilock(ip);
     if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))
       return ip;
     iunlockput(ip);
     return 0;
   }
 
-  /** 在 Buffer cache 中分配一个新的 inode */
   if((ip = ialloc(dp->dev, type)) == 0)
     panic("create: ialloc");
 
@@ -285,41 +281,6 @@ create(char *path, short type, short major, short minor)
   iunlockput(dp);
 
   return ip;
-}
-
-static struct inode*
-symlinkroot(struct inode *ip)
-{
-  uint visted[SYMLINKDEPTH];
-  char path[MAXPATH];
-     
-  /** for-loop 之前 ip 一定持有 lock */
-  for(int i=0; i<SYMLINKDEPTH; i++) {
-    visted[i] = ip->inum;
-
-    /** 在调用 readi 之前需要持有 ip->lock */
-    if(readi(ip, 0, (uint64)path, 0, MAXPATH) <= 0) 
-      goto rootFail;
-
-    /** 寻找 symlink 的上级 inode */
-    iunlockput(ip);   /** 调用 namei 时别带 lock ，否则会 deadlock ， 因为 namei 可能会操纵 ip */ 
-    if((ip=namei(path)) == 0) 
-      return 0;
-      
-    for(int tail=i; tail>=0; tail--) {
-      if(ip->inum == visted[tail]) 
-        return 0;
-    }
-    
-    /** 没成环 */
-    ilock(ip);
-    if(ip->type != T_SYMLINK)  /** 持有 lock 返回上层 */
-      return ip;
-  }  
-
-rootFail:
-  iunlockput(ip);
-  return 0;
 }
 
 uint64
@@ -356,18 +317,9 @@ sys_open(void)
   }
 
   if(ip->type == T_DEVICE && (ip->major < 0 || ip->major >= NDEV)){
-    iunlockput(ip);   /** 第 351 行持有过 lock  */
+    iunlockput(ip);
     end_op();
     return -1;
-  }
-
-  /** 符号链接业务流程 */
-  if(ip->type==T_SYMLINK && (omode & O_NOFOLLOW)==0) {
-    /** 尝试从 symlink 处追根溯源 */
-    if((ip=symlinkroot(ip)) == 0) { /** 若溯源失败，则在 symlinkroot 中放锁，这是因为代码封装的局限性必须要做出的牺牲 */
-      end_op();
-      return -1;
-    }
   }
 
   if((f = filealloc()) == 0 || (fd = fdalloc(f)) < 0){
@@ -393,7 +345,7 @@ sys_open(void)
     itrunc(ip);
   }
 
-  iunlock(ip);  /** 对于成功 open 的 inode ，在最后予以统一放锁  */
+  iunlock(ip);
   end_op();
 
   return fd;
@@ -534,34 +486,93 @@ sys_pipe(void)
 }
 
 uint64
-sys_symlink(void)
+sys_mmap(void)
 {
-  struct inode *ip;
-  char target[MAXPATH], path[MAXPATH];
+  uint64 addr;
+  int len, prot, flags, fd, offset;
+  struct file* file;
+  struct vma* vma = 0;
 
-  if(argstr(0, target, MAXPATH)<0 || argstr(1, path, MAXPATH)<0)
+  if(argaddr(0, &addr)<0 || argint(1, &len)<0
+    || argint(2, &prot)<0 || argint(3, &flags)<0
+    || argfd(4, &fd, &file)<0 || argint(5, &offset)<0)
     return -1;
 
-  begin_op();
-
-  /** 尝试分配一个名为 path 的 inode 作为符号链接 */
-  if((ip=create(path, T_SYMLINK, 0, 0)) == 0) { 
-    /** 调用 create 之后，仍持有 ip->lock ，因为 create 并没有释放 */
-    end_op();
+  /** 文件不可写，但却要求其可访问级别为可写，且之后会与其他进程共享内容 */
+  if(!file->writable && (prot & PROT_WRITE) && flags==MAP_SHARED)
     return -1;
+
+  struct proc* p = myproc();
+  len = PGROUNDUP(len);
+
+  if(p->sz+len > MAXVA)
+    return -1;
+
+  if(offset<0 || offset%PGSIZE)
+    return -1;
+
+  for(int i=0; i<NVMA; i++) {
+    if(p->vmas[i].addr)
+      continue;
+
+    vma = &p->vmas[i];
+    break;
   }
 
-  /** 将 target 文件路径名写入 ip 的第一块 block 中 */
-  if(writei(ip, 0, (uint64)target, 0, strlen(target)) < 0) {  
-    /** 调用 writei 之前需要持有 ip->lock */
-    iunlockput(ip);
-    end_op();
+  if(!vma) /** 在 vm 中没找到可以被用作映射的空闲区域 */
     return -1;
+
+  if(addr == 0) 
+    vma->addr = p->sz;
+  else  /** Caller 指定映射的起始地址 */
+    vma->addr = addr;
+  
+  vma->len = len;
+  vma->prot = prot;
+  vma->flags = flags;
+  vma->fd = fd;
+  vma->offset = offset;
+  vma->file = file;
+  filedup(file);
+  p->sz += len;
+
+  return vma->addr;
+}
+
+uint64
+sys_munmap(void)
+{
+  uint64 addr;
+  int len;
+  struct vma* vma = 0;
+  struct proc* p = myproc();
+
+  if(argaddr(0, &addr)<0 || argint(1, &len)<0)
+    return -1;
+
+  addr = PGROUNDDOWN(addr);
+  len = PGROUNDUP(len);
+
+  for(int i=0; i<NVMA; i++) {
+    if(p->vmas[i].addr && addr>=p->vmas[i].addr 
+      && addr+len<=p->vmas[i].addr+p->vmas[i].len) {
+      vma = &p->vmas[i];
+      break;
+    }
   }
 
-  /** 所以 writei 之后需要释放 ip->lock */ 
-  iunlockput(ip); /** iunlockput = iunlock + iput */
+  if(!vma)
+    return -1;
 
-  end_op();
-  return 0;
+  if(addr != vma->addr)
+    return -1;
+
+  /** 逐个释放映射在 vm 中的 file's pages */
+  vma->addr += len;
+  vma->len -= len;
+  if(vma->flags & MAP_SHARED)
+    filewrite(vma->file, addr, len);
+  uvmunmap(p->pagetable, addr, len/PGSIZE, 1);
+
+  return 0;  
 }
