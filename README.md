@@ -16,6 +16,7 @@
 + [x] [lab7: multithreading](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/thread)
 + [x] [lab8: locks](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/lock)
 + [x] [lab9: file system](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/fs)
++ [x] [lab10: mmap](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/mmap)
 
 ## #注意事项
 + 每个 lab-code 都上传至 branch 的相应位置，其中
@@ -30,3 +31,4 @@
   | thread   | lab7: multithreading|
   | lock | lab8: locks |
   | fs | lab9: file system |
+  | mmap | lab10: mmap |
