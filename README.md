@@ -4,6 +4,7 @@
 + [MIT-6.S081 xv6-labs-2020](https://pdos.csail.mit.edu/6.828/2020/schedule.html)
 
 ## #Head BLog
++ [知乎 - wan2njupt](https://www.zhihu.com/people/wan2njupt/posts)
 + [CSDN - 万8169](https://blog.csdn.net/qq_34872231/category_12139190.html?spm=1001.2014.3001.5482)
 + [掘金 - 洪杰万](https://juejin.cn/user/805307982808328/posts)
 
@@ -17,6 +18,7 @@
 + [x] [lab8: locks](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/lock)
 + [x] [lab9: file system](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/fs)
 + [x] [lab10: mmap](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/mmap)
++ [x] [lab11: networking](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/net)
 
 ## #注意事项
 + 每个 lab-code 都上传至 branch 的相应位置，其中
@@ -32,3 +34,4 @@
   | lock | lab8: locks |
   | fs | lab9: file system |
   | mmap | lab10: mmap |
+  | net | lab11: networking |
