@@ -4,9 +4,7 @@
 + [MIT-6.S081 xv6-labs-2020](https://pdos.csail.mit.edu/6.828/2020/schedule.html)
 
 ## #Head BLog
-+ [知乎 - wan2njupt](https://www.zhihu.com/people/wan2njupt/posts)
-+ [CSDN - 万8169](https://blog.csdn.net/qq_34872231/category_12139190.html?spm=1001.2014.3001.5482)
-+ [掘金 - 洪杰万](https://juejin.cn/user/805307982808328/posts)
++ [CSDN - 士全](https://blog.csdn.net/qq_34872231/category_12139190.html?spm=1001.2014.3001.5482)
 
 ## #目录
 + [x] [lab2: system calls](https://github.com/Wan58169/MIT-6.S081-xv6-labs-2020/tree/syscall)
